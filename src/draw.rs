@@ -1,5 +1,5 @@
 use crate::{Graph, HasKey, Vec2d, SIZE};
-use tiny_skia::{Pixmap, Color, Paint, Path, PathBuilder, Stroke, Transform, FillRule};
+use tiny_skia::{Color, FillRule, Paint, Path, PathBuilder, Pixmap, Stroke, Transform};
 
 const WEIGHT_DISPLAY_THRESHOLD: f32 = 1.;
 const WEIGHT_COLOUR_START: f32 = 5.;
@@ -33,14 +33,22 @@ pub trait DrawPoint {
     }
 }
 
-pub fn draw<N: DrawPoint + HasKey>(graph: &Graph<N, f32>) -> Pixmap where N::Key: PartialOrd {
+pub fn draw<N: DrawPoint + HasKey>(graph: &Graph<N, f32>) -> Pixmap
+where
+    N::Key: PartialOrd,
+{
     let mut pixmap = Pixmap::new(SIZE as u32, SIZE as u32).unwrap();
-    pixmap.fill(Color::from_rgba8(BACKGROUND_COLOUR[0], BACKGROUND_COLOUR[1], BACKGROUND_COLOUR[2], 255));
+    pixmap.fill(Color::from_rgba8(
+        BACKGROUND_COLOUR[0],
+        BACKGROUND_COLOUR[1],
+        BACKGROUND_COLOUR[2],
+        255,
+    ));
     let transform = Transform::default();
     for from in graph.nodes() {
         for to in graph.nodes() {
             if from.key() <= to.key() {
-                continue;   // Only draw each edge once, and ignore equal nodes.
+                continue; // Only draw each edge once, and ignore equal nodes.
             }
             let weight = graph.get_weight(&from.key(), &to.key());
             if weight < WEIGHT_DISPLAY_THRESHOLD {
@@ -53,12 +61,21 @@ pub fn draw<N: DrawPoint + HasKey>(graph: &Graph<N, f32>) -> Pixmap where N::Key
             let path = path.finish().unwrap();
             let mut paint = Paint::default();
             paint.set_color(weight_colour(weight));
-            let stroke = Stroke { width: EDGE_WIDTH, ..Stroke::default() };
+            let stroke = Stroke {
+                width: EDGE_WIDTH,
+                ..Stroke::default()
+            };
             pixmap.stroke_path(&path, &paint, &stroke, transform, None);
         }
     }
     for node in graph.nodes() {
-        pixmap.fill_path(&node.path(), &node.paint(), FillRule::default(), transform, None);
+        pixmap.fill_path(
+            &node.path(),
+            &node.paint(),
+            FillRule::default(),
+            transform,
+            None,
+        );
     }
     pixmap
 }

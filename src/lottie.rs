@@ -29,8 +29,7 @@ to_string_as_json!(u8, u32, u64, f64);
 /// Implement `AsJson` for vectors of `AsJson` types by joining the elements with commas.
 impl<T: AsJson> AsJson for Vec<T> {
     fn as_json(&self) -> String {
-        self
-            .iter()
+        self.iter()
             .map(AsJson::as_json)
             .collect::<Vec<_>>()
             .join(",")
@@ -139,7 +138,7 @@ impl AsJson for Segment {
 
 /// A line shape, defined by its start and end points.
 pub struct Line {
-    pub segment: Prop<Segment>
+    pub segment: Prop<Segment>,
 }
 
 impl AsJson for Line {
@@ -273,6 +272,7 @@ impl File {
     }
 }
 
+#[macro_export]
 macro_rules! prop {
     (static { $value:expr }) => {
         $crate::lottie::Prop::Static($value)
@@ -288,6 +288,7 @@ macro_rules! prop {
     };
 }
 
+#[macro_export]
 macro_rules! shape {
     ($shape:ident { $( $kind:ident $name:ident $value:tt )* }) => {
         $crate::lottie::Shape::$shape($crate::lottie::$shape {
@@ -296,6 +297,7 @@ macro_rules! shape {
     };
 }
 
+#[macro_export]
 macro_rules! layer {
     (($start:expr; $end:expr) $( $name:ident $props:tt )*) => {
         $crate::lottie::Layer {
@@ -310,7 +312,7 @@ macro_rules! layer {
 
 #[cfg(test)]
 mod tests {
-    use super::{File, Segment, Vec2d, Colour};
+    use super::{Colour, File, Segment, Vec2d};
 
     #[test]
     fn entire_file() {

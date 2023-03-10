@@ -5,9 +5,9 @@
     // missing_docs,
     // clippy::missing_docs_in_private_items
 )]
-use vec2d::Vec2d;
+use draw::{draw, DrawPoint};
 use graph::{Graph, HasKey};
-use draw::{DrawPoint, draw};
+use vec2d::Vec2d;
 
 mod draw;
 mod graph;
@@ -56,7 +56,10 @@ pub struct System {
 impl System {
     #[must_use]
     pub fn new() -> Self {
-        Self { graph: Graph::new(), steps: 0 }
+        Self {
+            graph: Graph::new(),
+            steps: 0,
+        }
     }
 
     pub fn add_node(&mut self, id: u64, colour: [u8; 3]) -> u64 {
@@ -64,7 +67,12 @@ impl System {
         let jitter = Vec2d::random_unit() * STARTING_JITTER;
         let pos = center + jitter;
         let velocity = Vec2d::new(0., 0.);
-        self.graph.add_node(Node { id, pos, velocity, colour });
+        self.graph.add_node(Node {
+            id,
+            pos,
+            velocity,
+            colour,
+        });
         id
     }
 
@@ -105,7 +113,9 @@ impl System {
     }
 
     pub fn render(&self) {
-        draw(&self.graph).save_png(format!("frames/{:0>5}.png", self.steps)).unwrap();
+        draw(&self.graph)
+            .save_png(format!("frames/{:0>5}.png", self.steps))
+            .unwrap();
     }
 
     fn max_distance(&self) -> f32 {

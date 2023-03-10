@@ -5,7 +5,7 @@ use std::hash::Hash;
 pub trait HasKey {
     /// The key type. This should be small and suitable for use as a hashmap key.
     type Key: Hash + Eq + Clone;
-    
+
     /// Get the key for this node. This should be a cheap operation - ideally just attribute access.
     fn key(&self) -> Self::Key;
 }
@@ -43,7 +43,10 @@ impl<N: HasKey, W: Clone + Default> Graph<N, W> {
     /// Create a new, empty graph.
     #[must_use]
     pub fn new() -> Self {
-        Self { nodes: HashMap::new(), edges: HashMap::new() }
+        Self {
+            nodes: HashMap::new(),
+            edges: HashMap::new(),
+        }
     }
 
     /// Add a new node to the graph.
