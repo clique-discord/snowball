@@ -1,0 +1,8 @@
+/target
+/Cargo.lock
+flamegraph.svg
+/frames
+test*.mp4
+perf.data
+/.idea
+

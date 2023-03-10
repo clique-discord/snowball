@@ -1,0 +1,11 @@
+[package]
+name = "snowball"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tiny-skia = "0.8"
+rand = "0.8"
+
+[profile.release]
+debug = 1
