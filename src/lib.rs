@@ -11,6 +11,7 @@ use draw::{DrawPoint, draw};
 
 mod draw;
 mod graph;
+mod lottie;
 mod vec2d;
 
 const SPRING_CONSTANT: f32 = 0.01;

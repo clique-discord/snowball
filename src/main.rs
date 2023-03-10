@@ -1,6 +1,5 @@
 use snowball::System;
 
-
 fn main() {
     let mut system = System::new();
     system.add_node(0, [181, 137, 0]);
