@@ -1,138 +1,174 @@
-/// A basic implementation of some features of Lottie, a JSON-based vector animation format.
-///
-/// This does not attempt to cover anywhere near everything Lottie is capable of, only the specific
-/// features needed for this project. Additionally, only creating a Lottie file from scratch is
-/// supported, there is no deserialization.
-use crate::Vec2d;
+//! A basic implementation of some features of Lottie, a JSON-based vector animation format.
+//!
+//! This does not attempt to cover anywhere near everything Lottie is capable of, only the specific
+//! features needed for this project. Additionally, only creating a Lottie file from scratch is
+//! supported, there is no deserialization.
+//!
+//! # Numbers
+//!
+//! Lottie seems to accept fractional numbers almost everywhere, so we could just use `f32` for
+//! everything. However, for our purposes integer values suffice for coordinates and dimensions,
+//! and we need to truncate at some precision anyway to keep files small. Therefore we use `u32` for
+//! all coordinates and dimensions. We also use `u32` for frame numbers (theoretically allowing an
+//! almost 3 year animation at 60fps).
+//!
+//! Colours in Lottie are represented by values in the 0-1 range, so we use `f32` for them. Opacity
+//! on the other hand is represented by values in the 0-100 range, which we use a `u8` for.
+use std::fmt::Write;
 
 /// A simple trait for any possible element of a lottie file.
-pub trait AsJson {
-    /// Returns a string representation of the element as JSON.
-    fn as_json(&self) -> String;
+pub trait WriteJson {
+    /// Write a JSON representation of the element to a buffer.
+    fn write_json(&self, s: &mut String);
 }
 
-/// A simple macro for implementing `AsJson` for selected types that can be converted to a string.
-macro_rules! to_string_as_json {
+/// A simple macro for implementing `WriteJson` for selected types that can be converted to a string.
+macro_rules! to_string_write_json {
     ($($t:ty),*) => {
         $(
-            impl AsJson for $t {
-                fn as_json(&self) -> String {
-                    self.to_string()
+            impl WriteJson for $t {
+                fn write_json(&self, s: &mut String) {
+                    write!(s, "{}", self).unwrap();
                 }
             }
         )*
     }
 }
 
-to_string_as_json!(u8, u32);
+to_string_write_json!(u8, u32);
 
-/// Implement `AsJson` for vectors of `AsJson` types by joining the elements with commas.
-impl<T: AsJson> AsJson for Vec<T> {
-    fn as_json(&self) -> String {
-        self.iter()
-            .map(AsJson::as_json)
-            .collect::<Vec<_>>()
-            .join(",")
+/// Implement `WriteJson` for vectors of `WriteJson` types by joining the elements with commas.
+impl<T: WriteJson> WriteJson for Vec<T> {
+    fn write_json(&self, s: &mut String) {
+        let mut first = true;
+        for v in self {
+            if first {
+                first = false;
+            } else {
+                s.push(',');
+            }
+            v.write_json(s);
+        }
     }
 }
 
-/// Implement `AsJson` for (x, y) tuples as a two-element array.
-impl AsJson for Vec2d {
-    fn as_json(&self) -> String {
-        format!("[{:.0},{:.0}]", self.x, self.y)
+/// Integer coordinates.
+///
+/// Lottie seems to accept fractional numbers almost everywhere, but we want to truncate anyway to
+/// reduce file size, and integers provide performance benefits too.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Coords(pub u32, pub u32);
+
+impl WriteJson for Coords {
+    fn write_json(&self, s: &mut String) {
+        write!(s, "[{},{}]", self.0, self.1).unwrap();
     }
 }
 
 /// A keyframe of an animated property.
-pub struct Keyframe<T: AsJson> {
+pub struct Keyframe<T: WriteJson> {
     /// The time at which this keyframe occurs.
-    pub time: u64,
+    pub time: u32,
     /// The value of the property at this keyframe.
     pub value: T,
 }
 
-impl<T: AsJson> AsJson for Keyframe<T> {
-    fn as_json(&self) -> String {
-        let mut value = self.value.as_json();
+impl<T: WriteJson> WriteJson for Keyframe<T> {
+    fn write_json(&self, s: &mut String) {
+        let mut value_buffer = String::new();
+        self.value.write_json(&mut value_buffer);
         // For whatever reason, what would be a non-array type on a static property must be a one
-        // element array on an animated property.
-        if !value.starts_with('[') {
-            value = format!("[{value}]");
+        // element array on an animated property. Therefore we must check if the value is already an
+        // array, and if not, wrap it in one.
+        if !value_buffer.starts_with('[') {
+            value_buffer.insert(0, '[');
+            value_buffer.push(']');
         }
-        format!(
-            r#"{{"t":{t},"i":{{"x":1,"y":1}},"o":{{"x":0,"y":0}},"s":{s}}}"#,
+        write!(
+            s,
+            r#"{{"t":{t},"i":{{"x":1,"y":1}},"o":{{"x":0,"y":0}},"s":{value}}}"#,
             t = self.time,
-            s = value,
+            value = value_buffer,
         )
+        .unwrap();
     }
 }
 
 /// A property of any type that can be either animated or static.
-pub enum Prop<T: AsJson> {
+pub enum Prop<T: WriteJson> {
     /// A property that is constant over time.
     Static(T),
     /// A property that is animated over time.
     Animated(Vec<Keyframe<T>>),
 }
 
-impl<T: AsJson> AsJson for Prop<T> {
-    fn as_json(&self) -> String {
+impl<T: WriteJson> WriteJson for Prop<T> {
+    fn write_json(&self, s: &mut String) {
         match self {
-            Self::Static(v) => format!(r#"{{"a":0,"k":{k}}}"#, k = v.as_json()),
-            Self::Animated(v) => format!(r#"{{"a":1,"k":[{k}]}}"#, k = v.as_json()),
+            Self::Static(v) => {
+                s.push_str(r#"{"a":0,"k":"#);
+                v.write_json(s);
+                s.push('}');
+            }
+            Self::Animated(v) => {
+                s.push_str(r#"{"a":1,"k":["#);
+                v.write_json(s);
+                s.push_str("]}");
+            }
         }
     }
 }
 
 /// A rectangle shape, defined by its center, width and height.
 pub struct Rectangle {
-    pub center: Prop<Vec2d>,
-    pub size: Prop<Vec2d>,
+    pub center: Prop<Coords>,
+    pub size: Prop<Coords>,
     pub roundness: Prop<u32>,
 }
 
-impl AsJson for Rectangle {
-    fn as_json(&self) -> String {
-        format!(
-            r#"{{"ty":"rc","p":{p},"s":{s},"r":{r}}}"#,
-            p = self.center.as_json(),
-            s = self.size.as_json(),
-            r = self.roundness.as_json(),
-        )
+impl WriteJson for Rectangle {
+    fn write_json(&self, s: &mut String) {
+        s.push_str(r#"{"ty":"rc","p":"#);
+        self.center.write_json(s);
+        s.push_str(r#","s":"#);
+        self.size.write_json(s);
+        s.push_str(r#","r":"#);
+        self.roundness.write_json(s);
+        s.push('}');
     }
 }
 
 /// An ellipse shape, defined by its center, width and height.
 pub struct Ellipse {
-    pub center: Prop<Vec2d>,
-    pub size: Prop<Vec2d>,
+    pub center: Prop<Coords>,
+    pub size: Prop<Coords>,
 }
 
-impl AsJson for Ellipse {
-    fn as_json(&self) -> String {
-        format!(
-            r#"{{"ty":"el","p":{p},"s":{s}}}"#,
-            p = self.center.as_json(),
-            s = self.size.as_json(),
-        )
+impl WriteJson for Ellipse {
+    fn write_json(&self, s: &mut String) {
+        s.push_str(r#"{"ty":"el","p":"#);
+        self.center.write_json(s);
+        s.push_str(r#","s":"#);
+        self.size.write_json(s);
+        s.push('}');
     }
 }
 
 /// A path with just two points, and no curves.
 ///
 /// While Lottie supports paths with multiple points and bezier curves, this is all we need for now.
-pub struct Segment(pub Vec2d, pub Vec2d);
+pub struct Segment(pub Coords, pub Coords);
 
-impl AsJson for Segment {
-    fn as_json(&self) -> String {
+impl WriteJson for Segment {
+    fn write_json(&self, s: &mut String) {
         // `c: false` means that the path does not form a closed loop.
         // The `i` and `o` fields define the way in which the path curves - the values here mean
         // that the path is straight.
-        format!(
-            r#"{{"c":false,"v":[{s},{e}],"i":[[0,0],[0,0]],"o":[[0,0],[0,0]]}}"#,
-            s = self.0.as_json(),
-            e = self.1.as_json(),
-        )
+        s.push_str(r#"{"c":false,"i":[[0,0],[0,0]],"o":[[0,0],[0,0]],"v":["#);
+        self.0.write_json(s);
+        s.push(',');
+        self.1.write_json(s);
+        s.push_str("]}");
     }
 }
 
@@ -141,9 +177,11 @@ pub struct Line {
     pub segment: Prop<Segment>,
 }
 
-impl AsJson for Line {
-    fn as_json(&self) -> String {
-        format!(r#"{{"ty":"sh","ks":{k}}}"#, k = self.segment.as_json())
+impl WriteJson for Line {
+    fn write_json(&self, s: &mut String) {
+        s.push_str(r#"{"ty":"fl","ks":"#);
+        self.segment.write_json(s);
+        s.push('}');
     }
 }
 
@@ -154,9 +192,9 @@ impl AsJson for Line {
 pub struct Colour(pub f32, pub f32, pub f32);
 
 /// Implement `AsJson` for colours by returning a JSON array of the RGB values.
-impl AsJson for Colour {
-    fn as_json(&self) -> String {
-        format!("[{},{},{}]", self.0, self.1, self.2)
+impl WriteJson for Colour {
+    fn write_json(&self, s: &mut String) {
+        write!(s, "[{:.3},{:.3},{:.3}]", self.0, self.1, self.2).unwrap();
     }
 }
 
@@ -168,13 +206,13 @@ pub struct Fill {
     pub opacity: Prop<u8>,
 }
 
-impl AsJson for Fill {
-    fn as_json(&self) -> String {
-        format!(
-            r#"{{"ty":"fl","o":{o},"c":{c}}}"#,
-            o = self.opacity.as_json(),
-            c = self.colour.as_json(),
-        )
+impl WriteJson for Fill {
+    fn write_json(&self, s: &mut String) {
+        s.push_str(r#"{"ty":"fl","o":"#);
+        self.opacity.write_json(s);
+        s.push_str(r#","c":"#);
+        self.colour.write_json(s);
+        s.push('}');
     }
 }
 
@@ -188,14 +226,15 @@ pub struct Stroke {
     pub width: Prop<u32>,
 }
 
-impl AsJson for Stroke {
-    fn as_json(&self) -> String {
-        format!(
-            r#"{{"ty":"st","o":{o},"c":{c},"w":{w}}}"#,
-            o = self.opacity.as_json(),
-            c = self.colour.as_json(),
-            w = self.width.as_json(),
-        )
+impl WriteJson for Stroke {
+    fn write_json(&self, s: &mut String) {
+        s.push_str(r#"{"ty":"st","o":"#);
+        self.opacity.write_json(s);
+        s.push_str(r#","c":"#);
+        self.colour.write_json(s);
+        s.push_str(r#","w":"#);
+        self.width.write_json(s);
+        s.push('}');
     }
 }
 
@@ -211,14 +250,14 @@ pub enum Shape {
     Stroke(Stroke),
 }
 
-impl AsJson for Shape {
-    fn as_json(&self) -> String {
+impl WriteJson for Shape {
+    fn write_json(&self, s: &mut String) {
         match self {
-            Self::Rectangle(r) => r.as_json(),
-            Self::Ellipse(e) => e.as_json(),
-            Self::Line(l) => l.as_json(),
-            Self::Fill(f) => f.as_json(),
-            Self::Stroke(s) => s.as_json(),
+            Self::Rectangle(r) => r.write_json(s),
+            Self::Ellipse(e) => e.write_json(s),
+            Self::Line(l) => l.write_json(s),
+            Self::Fill(f) => f.write_json(s),
+            Self::Stroke(st) => st.write_json(s),
         }
     }
 }
@@ -232,21 +271,22 @@ pub struct Layer {
     ///
     /// Note that this corresponds to the `ip` ("in point") field in Lottie, not
     /// `st` ("start time"). We always set the `st` field to `0`.
-    pub start: u64,
+    pub start: u32,
     /// The last frame for which this layer should be visible.
-    pub end: u64,
+    pub end: u32,
     /// The shapes that make up this layer.
     pub shapes: Vec<Shape>,
 }
 
-impl AsJson for Layer {
-    fn as_json(&self) -> String {
-        format!(
-            r#"{{"ip":{i},"op":{e},"st":0,"ks":{{}},"ty":4,"shapes":[{s}]}}"#,
-            i = self.start,
-            e = self.end,
-            s = self.shapes.as_json(),
-        )
+impl WriteJson for Layer {
+    fn write_json(&self, s: &mut String) {
+        s.push_str(r#"{"ip":"#);
+        write!(s, "{}", self.start).unwrap();
+        s.push_str(r#","op":"#);
+        write!(s, "{}", self.end).unwrap();
+        s.push_str(r#","st":0,"ks":{},"ty":4,"shapes":["#);
+        self.shapes.write_json(s);
+        s.push_str("]}");
     }
 }
 
@@ -255,21 +295,26 @@ pub struct File {
     pub frame_rate: u32,
     pub width: u32,
     pub height: u32,
-    pub length: u64,
+    pub length: u32,
     /// The layers, top to bottom.
     pub layers: Vec<Layer>,
 }
 
 impl File {
     pub fn as_json(&self) -> String {
-        format!(
-            r#"{{"fr":{f},"ip":0,"op":{o},"w":{w},"h":{h},"layers":[{l}]}}"#,
-            f = self.frame_rate,
-            o = self.length,
-            w = self.width,
-            h = self.height,
-            l = self.layers.as_json(),
-        )
+        let mut s = String::new();
+        s.push_str(r#"{"fr":"#);
+        write!(s, "{}", self.frame_rate).unwrap();
+        s.push_str(r#","ip":0,"op":"#);
+        write!(s, "{}", self.length).unwrap();
+        s.push_str(r#","w":"#);
+        write!(s, "{}", self.width).unwrap();
+        s.push_str(r#","h":"#);
+        write!(s, "{}", self.height).unwrap();
+        s.push_str(r#","layers":["#);
+        self.layers.write_json(&mut s);
+        s.push_str("]}");
+        s
     }
 }
 
@@ -315,7 +360,7 @@ pub use {layer, prop, shape};
 
 #[cfg(test)]
 mod tests {
-    use super::{Colour, File, Segment, Vec2d};
+    use super::{Colour, Coords, File, Segment};
 
     #[test]
     fn entire_file() {
@@ -328,7 +373,7 @@ mod tests {
                 layer! {
                     (0; 60)
                     Line {
-                        static segment { Segment(Vec2d::new(128., 256.), Vec2d::new(384., 256.)) }
+                        static segment { Segment(Coords(128, 256), Coords(384, 256)) }
                     }
                     Stroke {
                         static colour { Colour(0., 0., 0.) }
@@ -340,11 +385,11 @@ mod tests {
                     (0; 120)
                     Line {
                         keyframes segment {
-                            0 => Segment(Vec2d::new(0., 0.), Vec2d::new(512., 512.)),
-                            30 => Segment(Vec2d::new(512., 0.), Vec2d::new(0., 512.)),
-                            60 => Segment(Vec2d::new(512., 512.), Vec2d::new(0., 0.)),
-                            90 => Segment(Vec2d::new(0., 512.), Vec2d::new(512., 0.)),
-                            120 => Segment(Vec2d::new(0., 0.), Vec2d::new(512., 512.)),
+                            0 => Segment(Coords(0, 0), Coords(512, 512)),
+                            30 => Segment(Coords(512, 0), Coords(0, 512)),
+                            60 => Segment(Coords(512, 512), Coords(0, 0)),
+                            90 => Segment(Coords(0, 512), Coords(512, 0)),
+                            120 => Segment(Coords(0, 0), Coords(512, 512)),
                         }
                     }
                     Stroke {
@@ -357,10 +402,10 @@ mod tests {
                     (30; 60)
                     Ellipse {
                         keyframes center {
-                            30 => Vec2d::new(64., 64.),
-                            60 => Vec2d::new(448., 64.),
+                            30 => Coords(64, 64),
+                            60 => Coords(448, 64),
                         }
-                        static size { Vec2d::new(64., 64.) }
+                        static size { Coords(64, 64) }
                     }
                     Stroke {
                         static colour { Colour(0., 0., 1.) }
@@ -376,10 +421,10 @@ mod tests {
                     (90; 120)
                     Ellipse {
                         keyframes center {
-                            90 => Vec2d::new(448., 448.),
-                            120 => Vec2d::new(64., 448.),
+                            90 => Coords(448, 448),
+                            120 => Coords(64, 448),
                         }
-                        static size { Vec2d::new(64., 64.) }
+                        static size { Coords(64, 64) }
                     }
                     Stroke {
                         static colour { Colour(0., 1., 0.) }
@@ -394,10 +439,10 @@ mod tests {
                 layer! {
                     (0; 100)
                     Ellipse {
-                        static center { Vec2d::new(256., 256.) }
+                        static center { Coords(256, 256) }
                         keyframes size {
-                            0 => Vec2d::new(0., 0.),
-                            100 => Vec2d::new(362., 362.),
+                            0 => Coords(0, 0),
+                            100 => Coords(362, 362),
                         }
                     }
                     Fill {
@@ -414,8 +459,8 @@ mod tests {
                 layer! {
                     (0; 120)
                     Rectangle {
-                        static center { Vec2d::new(256., 256.) }
-                        static size { Vec2d::new(512., 512.) }
+                        static center { Coords(256, 256) }
+                        static size { Coords(512, 512) }
                         static roundness { 0 }
                     }
                     Fill {

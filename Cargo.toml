@@ -10,6 +10,7 @@ lottie = []
 [dependencies]
 tiny-skia = { version = "0.8", optional = true }
 rand = "0.8"
+hashbrown = "0.13"
 
 [profile.release]
 debug = 1

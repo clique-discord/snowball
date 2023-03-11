@@ -1,27 +1,27 @@
-use crate::lottie::{Colour, Ellipse, File, Fill, Keyframe, Layer, Prop, Shape};
+use crate::lottie::{Colour, Coords, Ellipse, File, Fill, Keyframe, Layer, Prop, Shape};
 use crate::{Vec2d, SIZE};
-use std::collections::HashMap;
+use hashbrown::HashMap;
 
-const NODE_SIZE: f32 = 20.;
+const NODE_SIZE: u32 = 20;
 
 #[derive(Clone, Debug)]
 struct Frame {
-    pos: Vec2d,
-    length: u64,
+    pos: Coords,
+    length: u32,
 }
 
 #[derive(Clone, Debug)]
 struct Node {
-    start: u64,
+    start: u32,
     colour: Colour,
     frames: Vec<Frame>,
 }
 
 impl Node {
     fn push_pos(&mut self, pos: Vec2d) {
+        let pos = Coords(pos.x as u32, pos.y as u32);
         if let Some(last) = self.frames.last_mut() {
-            let diff = last.pos - pos;
-            if (-1.0..1.).contains(&diff.x) && (-1.0..1.).contains(&diff.y) {
+            if last.pos == pos {
                 last.length += 1;
                 return;
             }
@@ -45,7 +45,7 @@ impl Node {
             shapes: vec![
                 Shape::Ellipse(Ellipse {
                     center: Prop::Animated(frames),
-                    size: Prop::Static(Vec2d::new(NODE_SIZE, NODE_SIZE)),
+                    size: Prop::Static(Coords(NODE_SIZE, NODE_SIZE)),
                 }),
                 Shape::Fill(Fill {
                     colour: Prop::Static(self.colour),
@@ -60,7 +60,7 @@ impl Node {
 pub struct History {
     open: HashMap<u64, Node>,
     closed: Vec<Node>,
-    step: u64,
+    step: u32,
 }
 
 impl History {

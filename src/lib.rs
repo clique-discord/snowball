@@ -93,34 +93,40 @@ impl System {
     }
 
     pub fn step(&mut self) {
-        let mut node_accel = Vec::new();
+        // First calculate the acceleration for each node, then apply it.
+        // This is necessary because the acceleration depends on the positions of all nodes.
+        let mut node_accel = Vec::with_capacity(self.graph.node_count());
         for node in self.graph.nodes() {
-            let mut accel = Vec2d::new(0., 0.);
-            for sibling in self.graph.nodes() {
-                if node.id == sibling.id {
-                    continue;
-                }
-                let weight = self.graph.get_weight(&node.id, &sibling.id);
-                let spring_length = (self.max_distance() - weight).max(MIN_SPRING_LENGTH);
-                let force = SPRING_CONSTANT * (node.pos.distance(sibling.pos) - spring_length);
-                let direction = (sibling.pos - node.pos).as_unit();
-                accel += direction * force;
-            }
-            node_accel.push((node.id, accel));
+            node_accel.push((node.id, self.node_acceleration(node)));
         }
         for (id, accel) in node_accel {
-            let node = self.graph.get_node_mut(&id).unwrap();
-            node.velocity += accel;
-            node.velocity *= DAMPING;
-            node.pos += node.velocity;
-            #[cfg(feature = "lottie")]
-            self.history.set_position(id, node.pos);
+            self.move_node(id, accel);
         }
         self.steps += 1;
         #[cfg(feature = "lottie")]
         self.history.next_step();
         #[cfg(feature = "png")]
         self.render_png_frame();
+    }
+
+    fn node_acceleration(&self, node: &Node) -> Vec2d {
+        let mut accel = Vec2d::new(0., 0.);
+        for (sibling, weight) in self.graph.edges(node.id) {
+            let spring_length = (self.max_distance() - weight).max(MIN_SPRING_LENGTH);
+            let force = SPRING_CONSTANT * (node.pos.distance(sibling.pos) - spring_length);
+            let direction = (sibling.pos - node.pos).as_unit();
+            accel += direction * force;
+        }
+        accel
+    }
+
+    fn move_node(&mut self, id: u64, accel: Vec2d) {
+        let node = self.graph.get_node_mut(&id).unwrap();
+        node.velocity += accel;
+        node.velocity *= DAMPING;
+        node.pos += node.velocity;
+        #[cfg(feature = "lottie")]
+        self.history.set_position(id, node.pos);
     }
 
     fn max_distance(&self) -> f32 {

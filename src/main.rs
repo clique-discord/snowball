@@ -37,7 +37,11 @@ fn test1() {
 }
 
 fn main() {
-    for _ in 0..100 {
+    let n = std::env::args()
+        .nth(1)
+        .map(|s| s.parse().unwrap())
+        .unwrap_or(1);
+    for _ in 0..n {
         test1();
     }
 }

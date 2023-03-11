@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use hashbrown::HashMap;
 use std::hash::Hash;
 
 /// A trait for nodes in the graph, which allows obtaining a key to identify them by.
@@ -112,6 +112,20 @@ impl<N: HasKey, W: Clone + Default> Graph<N, W> {
             .and_then(|m| m.get(to))
             .cloned()
             .unwrap_or_default()
+    }
+
+    /// Iterate over the every edge of a given node.
+    ///
+    /// Since all nodes are connected, this will give one edge for every other node in the graph.
+    pub fn edges(&self, key: N::Key) -> impl Iterator<Item = (&N, W)> {
+        let siblings = self.edges.get(&key);
+        self.nodes
+            .values()
+            .filter(move |node| node.key() != key)
+            .map(move |node| {
+                let weight = siblings.and_then(|m| m.get(&node.key()));
+                (node, weight.cloned().unwrap_or_default())
+            })
     }
 
     /// Remove a node from the graph, and return it if it existed.
