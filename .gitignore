@@ -1,8 +1,17 @@
+# Cargo files
 /target
 /Cargo.lock
+
+# Profiling artifacts
 flamegraph.svg
-/frames
-test*.mp4
 perf.data
+perf.data.old
+
+# Editor config
 /.idea
 
+# Test outputs
+/frames
+test*.mp4
+test.lottie
+test.lottie.gz

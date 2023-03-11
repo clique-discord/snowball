@@ -24,7 +24,7 @@ macro_rules! to_string_as_json {
     }
 }
 
-to_string_as_json!(u8, u32, u64, f64);
+to_string_as_json!(u8, u32);
 
 /// Implement `AsJson` for vectors of `AsJson` types by joining the elements with commas.
 impl<T: AsJson> AsJson for Vec<T> {
@@ -39,7 +39,7 @@ impl<T: AsJson> AsJson for Vec<T> {
 /// Implement `AsJson` for (x, y) tuples as a two-element array.
 impl AsJson for Vec2d {
     fn as_json(&self) -> String {
-        format!("[{},{}]", self.x, self.y)
+        format!("[{:.0},{:.0}]", self.x, self.y)
     }
 }
 
@@ -150,6 +150,7 @@ impl AsJson for Line {
 /// A property type for colours.
 ///
 /// This is a tuple of (R, G, B), where each value is a float between 0 and 1.
+#[derive(Clone, Copy, Debug)]
 pub struct Colour(pub f32, pub f32, pub f32);
 
 /// Implement `AsJson` for colours by returning a JSON array of the RGB values.
@@ -260,7 +261,7 @@ pub struct File {
 }
 
 impl File {
-    fn as_json(&self) -> String {
+    pub fn as_json(&self) -> String {
         format!(
             r#"{{"fr":{f},"ip":0,"op":{o},"w":{w},"h":{h},"layers":[{l}]}}"#,
             f = self.frame_rate,
@@ -309,6 +310,8 @@ macro_rules! layer {
         }
     };
 }
+
+pub use {layer, prop, shape};
 
 #[cfg(test)]
 mod tests {

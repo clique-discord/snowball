@@ -3,8 +3,12 @@ name = "snowball"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+png = ["tiny-skia"]
+lottie = []
+
 [dependencies]
-tiny-skia = "0.8"
+tiny-skia = { version = "0.8", optional = true }
 rand = "0.8"
 
 [profile.release]

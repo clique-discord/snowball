@@ -5,14 +5,22 @@
     // missing_docs,
     // clippy::missing_docs_in_private_items
 )]
-use draw::{draw, DrawPoint};
 use graph::{Graph, HasKey};
 use vec2d::Vec2d;
 
-mod draw;
+#[cfg(feature = "png")]
+use draw::{draw, DrawPoint};
+
 mod graph;
-mod lottie;
 mod vec2d;
+
+#[cfg(feature = "png")]
+mod draw;
+
+#[cfg(feature = "lottie")]
+mod lottie;
+#[cfg(feature = "lottie")]
+mod lottie_graph;
 
 const SPRING_CONSTANT: f32 = 0.01;
 const TARGET_DENSITY: f32 = 150.;
@@ -26,6 +34,7 @@ struct Node {
     id: u64,
     pos: Vec2d,
     velocity: Vec2d,
+    #[cfg(feature = "png")]
     colour: [u8; 3],
 }
 
@@ -37,6 +46,7 @@ impl HasKey for Node {
     }
 }
 
+#[cfg(feature = "png")]
 impl DrawPoint for Node {
     fn colour(&self) -> [u8; 3] {
         self.colour
@@ -50,16 +60,15 @@ impl DrawPoint for Node {
 #[derive(Clone, Debug, Default)]
 pub struct System {
     graph: Graph<Node, f32>,
+    #[cfg(feature = "lottie")]
+    history: lottie_graph::History,
     steps: u64,
 }
 
 impl System {
     #[must_use]
     pub fn new() -> Self {
-        Self {
-            graph: Graph::new(),
-            steps: 0,
-        }
+        Self::default()
     }
 
     pub fn add_node(&mut self, id: u64, colour: [u8; 3]) -> u64 {
@@ -71,8 +80,11 @@ impl System {
             id,
             pos,
             velocity,
+            #[cfg(feature = "png")]
             colour,
         });
+        #[cfg(feature = "lottie")]
+        self.history.add_node(id, colour);
         id
     }
 
@@ -101,24 +113,35 @@ impl System {
             node.velocity += accel;
             node.velocity *= DAMPING;
             node.pos += node.velocity;
+            #[cfg(feature = "lottie")]
+            self.history.set_position(id, node.pos);
         }
         self.steps += 1;
+        #[cfg(feature = "lottie")]
+        self.history.next_step();
+        #[cfg(feature = "png")]
+        self.render_png_frame();
     }
 
-    pub fn render_many_steps(&mut self, count: u64) {
+    fn max_distance(&self) -> f32 {
+        (self.graph.node_count() as f32).sqrt() * TARGET_DENSITY
+    }
+
+    pub fn many_steps(&mut self, count: u64) {
         for _ in 0..count {
             self.step();
-            self.render();
         }
     }
 
-    pub fn render(&self) {
+    #[cfg(feature = "png")]
+    pub fn render_png_frame(&self) {
         draw(&self.graph)
             .save_png(format!("frames/{:0>5}.png", self.steps))
             .unwrap();
     }
 
-    fn max_distance(&self) -> f32 {
-        (self.graph.node_count() as f32).sqrt() * TARGET_DENSITY
+    #[cfg(feature = "lottie")]
+    pub fn render_lottie(&self) {
+        println!("{}", self.history.render().as_json());
     }
 }
