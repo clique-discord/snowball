@@ -6,15 +6,19 @@
     // clippy::missing_docs_in_private_items
 )]
 use graph::{Graph, HasKey};
+use std::fs::File;
+use std::io::BufWriter;
 use vec2d::Vec2d;
 
-#[cfg(feature = "png")]
-use draw::{draw, DrawPoint};
+#[cfg(feature = "raster")]
+use draw::{Drawing, Order};
 
 mod graph;
+#[cfg(feature = "masquerade")]
+mod masquerade;
 mod vec2d;
 
-#[cfg(feature = "png")]
+#[cfg(feature = "raster")]
 mod draw;
 
 #[cfg(feature = "lottie")]
@@ -34,8 +38,10 @@ struct Node {
     id: u64,
     pos: Vec2d,
     velocity: Vec2d,
-    #[cfg(feature = "png")]
-    colour: [u8; 3],
+    #[cfg(feature = "raster")]
+    order: Order,
+    #[cfg(feature = "masquerade")]
+    palette_index: u8,
 }
 
 impl HasKey for Node {
@@ -46,29 +52,40 @@ impl HasKey for Node {
     }
 }
 
-#[cfg(feature = "png")]
-impl DrawPoint for Node {
-    fn colour(&self) -> [u8; 3] {
-        self.colour
-    }
-
-    fn center(&self) -> Vec2d {
-        self.pos
-    }
-}
-
-#[derive(Clone, Debug, Default)]
 pub struct System {
     graph: Graph<Node, f32>,
     #[cfg(feature = "lottie")]
     history: lottie_graph::History,
+    #[cfg(feature = "raster")]
+    drawing: Drawing,
+    #[cfg(feature = "gif")]
+    gif: gif::Encoder<BufWriter<File>>,
     steps: u64,
+    #[cfg(feature = "masquerade")]
+    im: masquerade::Image,
 }
 
 impl System {
     #[must_use]
     pub fn new() -> Self {
-        Self::default()
+        Self {
+            graph: Graph::new(),
+            #[cfg(feature = "lottie")]
+            history: lottie_graph::History::new(),
+            #[cfg(feature = "raster")]
+            drawing: Drawing::new(),
+            #[cfg(feature = "gif")]
+            gif: gif::Encoder::new(
+                BufWriter::new(File::create("out.gif").unwrap()),
+                SIZE as u16,
+                SIZE as u16,
+                &[],
+            )
+            .unwrap(),
+            steps: 0,
+            #[cfg(feature = "masquerade")]
+            im: masquerade::Image::new(),
+        }
     }
 
     pub fn add_node(&mut self, id: u64, colour: [u8; 3]) -> u64 {
@@ -76,12 +93,18 @@ impl System {
         let jitter = Vec2d::random_unit() * STARTING_JITTER;
         let pos = center + jitter;
         let velocity = Vec2d::new(0., 0.);
+        #[cfg(feature = "raster")]
+        let order = self.drawing.add_node(colour);
+        #[cfg(feature = "masquerade")]
+        let palette_index = self.im.add_node(colour);
         self.graph.add_node(Node {
             id,
             pos,
             velocity,
-            #[cfg(feature = "png")]
-            colour,
+            #[cfg(feature = "raster")]
+            order,
+            #[cfg(feature = "masquerade")]
+            palette_index,
         });
         #[cfg(feature = "lottie")]
         self.history.add_node(id, colour);
@@ -99,14 +122,16 @@ impl System {
         for node in self.graph.nodes() {
             node_accel.push((node.id, self.node_acceleration(node)));
         }
+        #[cfg(feature = "masquerade")]
+        self.im.new_frame();
         for (id, accel) in node_accel {
             self.move_node(id, accel);
         }
         self.steps += 1;
         #[cfg(feature = "lottie")]
         self.history.next_step();
-        #[cfg(feature = "png")]
-        self.render_png_frame();
+        #[cfg(feature = "raster")]
+        self.render_raster_frame();
     }
 
     fn node_acceleration(&self, node: &Node) -> Vec2d {
@@ -127,6 +152,10 @@ impl System {
         node.pos += node.velocity;
         #[cfg(feature = "lottie")]
         self.history.set_position(id, node.pos);
+        #[cfg(feature = "raster")]
+        self.drawing.place_node(node.order, node.pos);
+        #[cfg(feature = "masquerade")]
+        self.im.place_node(node.palette_index, node.pos);
     }
 
     fn max_distance(&self) -> f32 {
@@ -139,15 +168,38 @@ impl System {
         }
     }
 
+    #[cfg(feature = "raster")]
+    fn render_raster_frame(&mut self) {
+        self.drawing.render_frame();
+        #[cfg(feature = "png")]
+        self.render_png_frame();
+        #[cfg(feature = "gif")]
+        self.render_gif_frame();
+    }
+
     #[cfg(feature = "png")]
-    pub fn render_png_frame(&self) {
-        draw(&self.graph)
-            .save_png(format!("frames/{:0>5}.png", self.steps))
-            .unwrap();
+    fn render_png_frame(&mut self) {
+        let mut file = File::create(format!("frames/frame{:04}.png", self.steps)).unwrap();
+        let mut buf_writer = BufWriter::new(&mut file);
+        self.drawing.frame_as_png(&mut buf_writer);
+    }
+
+    #[cfg(feature = "gif")]
+    fn render_gif_frame(&mut self) {
+        let mut frame = self.drawing.frame_as_gif();
+        frame.delay = 2;
+        self.gif.write_frame(&frame).unwrap();
     }
 
     #[cfg(feature = "lottie")]
     pub fn render_lottie(&self) {
         println!("{}", self.history.render().as_json());
+    }
+
+    #[cfg(feature = "masquerade")]
+    pub fn render_masquerade(&self) {
+        let file = File::create("test.gif").unwrap();
+        let mut buf_writer = BufWriter::new(file);
+        self.im.render(&mut buf_writer);
     }
 }

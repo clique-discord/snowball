@@ -34,6 +34,8 @@ fn test1() {
     system.many_steps(400);
     #[cfg(feature = "lottie")]
     system.render_lottie();
+    #[cfg(feature = "masquerade")]
+    system.render_masquerade();
 }
 
 fn main() {

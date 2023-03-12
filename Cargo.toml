@@ -4,11 +4,17 @@ version = "0.1.0"
 edition = "2021"
 
 [features]
-png = ["tiny-skia"]
+masquerade = ["dep:gif", "dep:rayon"]
+gif = ["raster", "dep:gif"]
+png = ["raster", "dep:png"]
+raster = ["dep:forma-render"]
 lottie = []
 
 [dependencies]
-tiny-skia = { version = "0.8", optional = true }
+forma-render = { version = "0.1", optional = true }
+png = { version = "0.17", optional = true }
+gif = { version = "0.12", optional = true }
+rayon = { version = "1", optional = true }
 rand = "0.8"
 hashbrown = "0.13"
 

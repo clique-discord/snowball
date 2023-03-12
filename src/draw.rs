@@ -1,81 +1,174 @@
-use crate::{Graph, HasKey, Vec2d, SIZE};
-use tiny_skia::{Color, FillRule, Paint, Path, PathBuilder, Pixmap, Stroke, Transform};
+use crate::{Vec2d, SIZE};
+use forma_render::cpu::{
+    buffer::{layout::LinearLayout, BufferBuilder, BufferLayerCache},
+    Renderer, RGBA,
+};
+use forma_render::math::{AffineTransform, Point};
+use forma_render::styling::{Color, Fill, Func, Props, Style};
+use forma_render::{Composition, Path, PathBuilder};
+use std::io::Write;
 
-const WEIGHT_DISPLAY_THRESHOLD: f32 = 1.;
-const WEIGHT_COLOUR_START: f32 = 5.;
-const WEIGHT_COLOUR_END: f32 = 15.;
+pub use forma_render::Order;
+
 const NODE_RADIUS: f32 = 10.;
-const EDGE_WIDTH: f32 = 1.;
 const BACKGROUND_COLOUR: [u8; 3] = [238, 232, 213];
 
-fn weight_colour(mut weight: f32) -> Color {
-    weight = weight.log2().clamp(WEIGHT_COLOUR_START, WEIGHT_COLOUR_END);
-    weight -= WEIGHT_COLOUR_START;
-    weight /= WEIGHT_COLOUR_END - WEIGHT_COLOUR_START;
-    Color::from_rgba(weight, 0., 1. - weight, 1.).unwrap()
+fn node_path() -> Path {
+    let weight = 2.0f32.sqrt() / 2.;
+    let mut builder = PathBuilder::new();
+    builder.move_to(Point::new(0., NODE_RADIUS));
+    builder.rat_quad_to(
+        Point::new(NODE_RADIUS, NODE_RADIUS),
+        Point::new(NODE_RADIUS, 0.),
+        weight,
+    );
+    builder.rat_quad_to(
+        Point::new(NODE_RADIUS, -NODE_RADIUS),
+        Point::new(0., -NODE_RADIUS),
+        weight,
+    );
+    builder.rat_quad_to(
+        Point::new(-NODE_RADIUS, -NODE_RADIUS),
+        Point::new(-NODE_RADIUS, 0.),
+        weight,
+    );
+    builder.rat_quad_to(
+        Point::new(-NODE_RADIUS, NODE_RADIUS),
+        Point::new(0., NODE_RADIUS),
+        weight,
+    );
+    builder.build()
 }
 
-pub trait DrawPoint {
-    fn colour(&self) -> [u8; 3];
+fn colour_from_rgb(rgb: [u8; 3]) -> Color {
+    let [r, g, b] = rgb;
+    let (r, g, b) = (r as f32 / 255., g as f32 / 255., b as f32 / 255.);
+    // Convert sRGB to linear, as forma_render uses a linear colour space and it is cheaper to do
+    // the conversion here than on each pixel value.
+    let (r, g, b) = (r.powf(2.2), g.powf(2.2), b.powf(2.2));
+    Color { r, g, b, a: 1.0 }
+}
 
-    fn paint(&self) -> Paint {
-        let [r, g, b] = self.colour();
-        let mut paint = Paint::default();
-        paint.set_color_rgba8(r, g, b, 255);
-        paint
-    }
-
-    fn center(&self) -> Vec2d;
-
-    fn path(&self) -> Path {
-        let center = self.center();
-        PathBuilder::from_circle(center.x, center.y, NODE_RADIUS).unwrap()
+fn solid_fill(rgb: [u8; 3]) -> Props {
+    Props {
+        func: Func::Draw(Style {
+            fill: Fill::Solid(colour_from_rgb(rgb)),
+            ..Default::default()
+        }),
+        ..Default::default()
     }
 }
 
-pub fn draw<N: DrawPoint + HasKey>(graph: &Graph<N, f32>) -> Pixmap
-where
-    N::Key: PartialOrd,
-{
-    let mut pixmap = Pixmap::new(SIZE as u32, SIZE as u32).unwrap();
-    pixmap.fill(Color::from_rgba8(
-        BACKGROUND_COLOUR[0],
-        BACKGROUND_COLOUR[1],
-        BACKGROUND_COLOUR[2],
-        255,
-    ));
-    let transform = Transform::default();
-    for from in graph.nodes() {
-        for to in graph.nodes() {
-            if from.key() <= to.key() {
-                continue; // Only draw each edge once, and ignore equal nodes.
-            }
-            let weight = graph.get_weight(&from.key(), &to.key());
-            if weight < WEIGHT_DISPLAY_THRESHOLD {
-                continue;
-            }
-            let mut path = PathBuilder::new();
-            let (from, to) = (from.center(), to.center());
-            path.move_to(from.x, from.y);
-            path.line_to(to.x, to.y);
-            let path = path.finish().unwrap();
-            let mut paint = Paint::default();
-            paint.set_color(weight_colour(weight));
-            let stroke = Stroke {
-                width: EDGE_WIDTH,
-                ..Stroke::default()
-            };
-            pixmap.stroke_path(&path, &paint, &stroke, transform, None);
+#[derive(Debug)]
+pub struct Drawing {
+    composition: Composition,
+    renderer: Renderer,
+    cache: BufferLayerCache,
+    buffer: Vec<u8>,
+    bg_col: Color,
+    next_order: u32,
+}
+
+impl Default for Drawing {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Drawing {
+    pub fn new() -> Self {
+        let mut composition = Composition::new();
+        /*
+        let mut background = composition.create_layer();
+        let mut bg_path = PathBuilder::new();
+        bg_path.move_to(Point::new(0., 0.));
+        bg_path.line_to(Point::new(SIZE, 0.));
+        bg_path.line_to(Point::new(SIZE, SIZE));
+        bg_path.line_to(Point::new(0., SIZE));
+        bg_path.line_to(Point::new(0., 0.));
+        background.insert(&bg_path.build());
+        background.set_props(solid_fill(BACKGROUND_COLOUR));
+        composition.insert(Order::new(0).unwrap(), background);
+        */
+        let mut renderer = Renderer::new();
+        let cache = renderer.create_buffer_layer_cache().unwrap();
+        let size = SIZE as usize;
+        let buffer = vec![0; size * size * 4];
+        let bg_col = colour_from_rgb(BACKGROUND_COLOUR);
+        Self {
+            composition,
+            renderer,
+            cache,
+            buffer,
+            bg_col,
+            next_order: 1,
         }
     }
-    for node in graph.nodes() {
-        pixmap.fill_path(
-            &node.path(),
-            &node.paint(),
-            FillRule::default(),
-            transform,
+
+    pub fn add_node(&mut self, colour: [u8; 3]) -> Order {
+        let mut layer = self.composition.create_layer();
+        layer.insert(&node_path());
+        layer.set_props(solid_fill(colour));
+        let order = Order::new(self.next_order).unwrap();
+        self.next_order += 1;
+        self.composition.insert(order, layer);
+        order
+    }
+
+    pub fn place_node(&mut self, order: Order, center: Vec2d) {
+        let layer = self.composition.get_mut(order).unwrap();
+        let transform = AffineTransform {
+            // x' = x * 1 + y * 0 + 1 * translate_x
+            ux: 1.,
+            vx: 0.,
+            tx: center.x,
+            // y' = x * 0 + y * 1 + 1 * translate_y
+            uy: 0.,
+            vy: 1.,
+            ty: center.y,
+        };
+        layer.set_transform(transform.try_into().unwrap());
+    }
+
+    pub fn hide_node(&mut self, order: Order) {
+        let layer = self.composition.get_mut(order).unwrap();
+        layer.disable();
+    }
+
+    pub fn show_node(&mut self, order: Order) {
+        let layer = self.composition.get_mut(order).unwrap();
+        layer.enable();
+    }
+
+    pub fn render_frame(&mut self) {
+        let size = SIZE as usize;
+        self.renderer.render(
+            &mut self.composition,
+            &mut BufferBuilder::new(
+                &mut self.buffer,
+                &mut LinearLayout::new(size, size * 4, size),
+            )
+            .layer_cache(self.cache.clone())
+            .build(),
+            RGBA,
+            self.bg_col,
             None,
         );
     }
-    pixmap
+
+    #[cfg(feature = "png")]
+    pub fn frame_as_png(&self, w: impl Write) {
+        let size = SIZE as u32;
+        let mut encoder = png::Encoder::new(w, size, size);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        let mut writer = encoder.write_header().unwrap();
+        writer.write_image_data(&self.buffer).unwrap();
+    }
+
+    #[cfg(feature = "gif")]
+    pub fn frame_as_gif(&mut self) -> gif::Frame {
+        let size = SIZE as u16;
+        gif::Frame::from_rgba_speed(size, size, &mut self.buffer, 20)
+    }
 }
